@@ -386,7 +386,7 @@ void BrachAndBound(IloEnv env, cmnd_t* instance)
 					else if (UB < tempUB)
 						tempUB = UB;
 				}
-				system("pause");
+				//system("pause");
 				tabuList.end();
 				nodeUpperBound = tempUB;
 				// 更新最优上界

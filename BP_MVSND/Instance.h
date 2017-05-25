@@ -22,12 +22,12 @@ typedef IloArray<IloRangeArray> IloRangeArray2;
 
 const int n_VehicleTypes = 5;
  //车辆容量[10,30]
-const double vehicleFixedcost[5] = { 101, 145, 168, 189, 214 };
+//const double vehicleFixedcost[5] = { 101, 145, 168, 189, 214 };
  //车辆容量[2,15]
 const double vehicleCapacity[5] = { 3, 7, 10, 13, 15 };
 
 
-
+const double vehicleFixedcost[5] = { 97, 145, 189, 256, 297 };
 //const double vehicleFixedcost[5] = { 14, 29, 36, 45, 50 };
 //const double vehicleFixedcost[5] = { 11, 15, 19, 24, 29 };
 //const double vehicleCapacity[5] = { 10, 15, 20, 25, 30 };

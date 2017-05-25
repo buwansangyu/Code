@@ -22,7 +22,7 @@ int main(int argc, char **argv)
 		//char* datafile = "../../../data/R/r01.1.dow";
 		//char* datafile = "../../../data/C/c36.dow";
 		//char* datafile = "../../../data/CPlus/c100_400_30_V_T_10.dow";
-		char* datafile = "../../../data/S/T01.txt";
+		char* datafile = "../../../data/S/S03.txt";
 		cmnd_t instance;
 		instance = cmnd_create(datafile);
 		//SolvedByCplex(env, &instance);

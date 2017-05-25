@@ -194,51 +194,53 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 		x[i] = IloNumVarArray(env);
 		for (int j = 0; j < instance->n_arcs; j++)
 		{
-			x[i].add(IloNumVar(env));
-			// 如果arc在集合中则加入到模型中
 			if (A_f[j])
-				CMCFcost.setLinearCoef(x[i][j], instance->arc_commod_ucost[j][i]);
+				x[i].add(IloNumVar(CMCFcost(instance->arc_commod_ucost[j][i])));
+			else
+				x[i].add(IloNumVar(env));
+
+			//x[i].add(IloNumVar(env));
+			//// 如果arc在集合中则加入到模型中
+			//if (A_f[j])
+			//	CMCFcost.setLinearCoef(x[i][j], instance->arc_commod_ucost[j][i]);
 		}
 	}
 	// capacity constraints
-	IloRangeArray CMCFcapacityConstraints(env);
-	IloInt num = 0;
 	for (int i = 0; i < instance->n_arcs; i++)
 	{
 		if (A_f[i])
 		{
-			CMCFcapacityConstraints.add(IloRange(env, -INFINITY, arcCapacity[i]));
+			IloExpr left(env);
 			for (int j = 0; j < instance->n_commods; j++)
-				CMCFcapacityConstraints[num].setLinearCoef(x[j][i], 1);
-			num++;
+				left += x[j][i];
+			CMCFmodel.add(left <= arcCapacity[i]);
+			left.end();
 		}
 	}
-	CMCFmodel.add(CMCFcapacityConstraints);
-
 	// Demand Constraints	
-	IloRangeArray2 demandConstraints(env, instance->n_nodes);
 	for (int i = 0; i < instance->n_nodes; i++)
 	{
-		demandConstraints[i] = IloRangeArray(env);
 		for (int j = 0; j < instance->n_commods; j++)
 		{
-			demandConstraints[i].add(IloRange(env, instance->node_commod_supply[i][j], instance->node_commod_supply[i][j]));
+			IloExpr left(env);
 			for (int k = 0; k < instance->node_n_outgoing_arcs[i]; k++)
 			{
 				if (A_f[instance->node_outgoing_arc[i][k]])
-					demandConstraints[i][j].setLinearCoef(x[j][instance->node_outgoing_arc[i][k]], 1);
+					left += x[j][instance->node_outgoing_arc[i][k]];
 			}
 
 			for (int k = 0; k < instance->node_n_ingoing_arcs[i]; k++)
 			{
 				if (A_f[instance->node_ingoing_arc[i][k]])
-					demandConstraints[i][j].setLinearCoef(x[j][instance->node_ingoing_arc[i][k]], -1);
+					left -= x[j][instance->node_ingoing_arc[i][k]];
 			}
+			CMCFmodel.add(left == instance->node_commod_supply[i][j]);
+			left.end();
 		}
-		CMCFmodel.add(demandConstraints[i]);
 	}
 	IloCplex CMCFSolver(CMCFmodel);
 	CMCFSolver.setOut(env.getNullStream());
+	
 	if (!CMCFSolver.solve())
 	{
 		cout << "CMCF model infeasible!!!!!!!!!!!!!!!!!!!!!!!" << endl;
@@ -246,15 +248,10 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 		for (int i = 0; i < x.getSize(); i++)
 			x[i].end();
 		x.end();
-		for (int i = 0; i < demandConstraints.getSize(); i++)
-			demandConstraints[i].end();
-		demandConstraints.end();
-		CMCFcapacityConstraints.end();
 		CMCFmodel.end();
 		CMCFSolver.end();
 		return -1;
 	}
-
 	// 更新xijk的值
 	IloNum CMCFtotalcost = 0;
 	cout << " x in local search: " << endl;
@@ -288,72 +285,73 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 	{
 		// 更新A_v
 		if (A_f[i])
+		{
 			A_v[i] = true;
+			IloNum temp = 0;
+			for (int j = 0; j < instance->n_commods; j++)
+				temp += CMCFSolver.getValue(x[j][i]);
+			flowij.add(temp);
+		}
 		else
-			continue;
+			flowij.add(0);
 
-		IloNum temp = 0;
-		for (int j = 0; j < instance->n_commods; j++)
-			temp += CMCFSolver.getValue(x[j][i]);
-		flowij.add(temp);
 	}
-
-
+	
 	// 车辆分配模型
 	// Heterogeneous Fleet Assginment model
 	IloModel HFAmodel(env);
 	IloObjective HFAcost = IloAdd(HFAmodel, IloMinimize(env));
-	// Capacity Constraints	
-	IloNumArray capacityUpperBound(env);
-	capacityUpperBound.add(flowij.getSize(), IloInfinity);
-	IloRangeArray  capacityConstraints = IloAdd(HFAmodel, IloRangeArray(env, flowij, capacityUpperBound));
 
 	// y_f_ij
 	IloIntVarArray2 y(env, n_VehicleTypes);
 	for (int i = 0; i < n_VehicleTypes; i++)
 	{
 		y[i] = IloIntVarArray(env);
-		IloInt count = 0;
 		for (int j = 0; j < instance->n_arcs; j++)
 		{
-			y[i].add(IloIntVar(env));
-			// capacity约束中用A_f
-			if (A_f[j])
-			{
-				capacityConstraints[count].setLinearCoef(y[i][j], vehicleCapacity[i]);
-				count++;
-			}
 			// y变量用A_v
 			if (A_v[j])
-				HFAcost.setLinearCoef(y[i][j], vehicleFixedcost[i]);
+				y[i].add(IloIntVar(HFAcost(vehicleFixedcost[i])));
+			else
+				y[i].add(IloIntVar(env));
+		}
+	}
+	
+	// capacity constraints
+	for (int i = 0; i < instance->n_arcs; i++)
+	{
+		if (A_f[i])
+		{
+			IloExpr left(env);
+			for (int j = 0; j < n_VehicleTypes; j++)
+				left += vehicleCapacity[j] * y[j][i];
+			HFAmodel.add(left >= flowij[i]);
+			left.end();
 		}
 	}
 	// Design-balanced constraints
-	IloRangeArray2 dbConstraints(env, instance->n_nodes);
 	for (int i = 0; i < instance->n_nodes; i++)
 	{
-		dbConstraints[i] = IloRangeArray(env);
 		for (int j = 0; j < n_VehicleTypes; j++)
 		{
 			// db约束中用A_v
-			dbConstraints[i].add(IloRange(env, 0, 0));
+			IloExpr left(env);
 			for (int k = 0; k < instance->node_n_outgoing_arcs[i]; k++)
 			{
 				if (A_v[instance->node_outgoing_arc[i][k]])
-					dbConstraints[i][j].setLinearCoef(y[j][instance->node_outgoing_arc[i][k]], 1);
+					left += y[j][instance->node_outgoing_arc[i][k]];
 			}
 
 
 			for (int k = 0; k < instance->node_n_ingoing_arcs[i]; k++)
 			{
 				if (A_v[instance->node_ingoing_arc[i][k]])
-					dbConstraints[i][j].setLinearCoef(y[j][instance->node_ingoing_arc[i][k]], -1);
+					left -= y[j][instance->node_ingoing_arc[i][k]];
 			}
+			HFAmodel.add(left == 0);
+			left.end();
 		}
-		HFAmodel.add(dbConstraints[i]);
 	}
-
-
 	IloCplex HFAsolver(HFAmodel);
 	HFAsolver.setParam(IloCplex::TiLim, 100);
 	HFAsolver.setOut(env.getNullStream());
@@ -367,15 +365,6 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 			x[i].end();
 		y.end();
 		x.end();
-		capacityUpperBound.end();
-		capacityConstraints.end();
-		for (int i = 0; i < demandConstraints.getSize(); i++)
-			demandConstraints[i].end();
-		demandConstraints.end();
-		CMCFcapacityConstraints.end();
-		for (int i = 0; i < dbConstraints.getSize(); i++)
-			dbConstraints[i].end();
-		dbConstraints.end();
 		flowij.end();
 		CMCFmodel.end();
 		CMCFSolver.end();
@@ -417,6 +406,7 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 			//system("pause");
 		}
 	}
+
 	// 最优化车辆分配
 	// 加上求解效果并没有提升
 	//HFAModel(env, instance, A_v, xijk);
@@ -428,15 +418,6 @@ IloNum SolvedByTwoModel(IloEnv env, cmnd_t* instance, IloBoolArray A_f, IloBoolA
 		x[i].end();
 	y.end();
 	x.end();
-	capacityUpperBound.end();
-	capacityConstraints.end();
-	for (int i = 0; i < demandConstraints.getSize(); i++)
-		demandConstraints[i].end();
-	demandConstraints.end();
-	CMCFcapacityConstraints.end();
-	for (int i = 0; i < dbConstraints.getSize(); i++)
-		dbConstraints[i].end();
-	dbConstraints.end();
 	flowij.end();
 	CMCFmodel.end();
 	CMCFSolver.end();

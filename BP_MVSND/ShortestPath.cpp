@@ -4,13 +4,7 @@ void SolvedByCplex(IloEnv env, cmnd_t* instance)
 {
 	IloModel arcModel(env);
 	IloObjective totalcost = IloAdd(arcModel, IloMinimize(env));
-
-	// Capacity Constraints	
-	IloNumArray capacityLowerBound(env);
-	IloNumArray capacityUpperBound(env);
-	capacityLowerBound.add(instance->n_arcs, -IloInfinity);
-	capacityUpperBound.add(instance->n_arcs, 0);
-	IloRangeArray  capacityConstraints = IloAdd(arcModel, IloRangeArray(env, capacityLowerBound, capacityUpperBound));
+	time_t start = clock();
 
 	IloNumVarArray2 x(env, instance->n_commods);
 	for (int i = 0; i < instance->n_commods; i++)
@@ -18,57 +12,67 @@ void SolvedByCplex(IloEnv env, cmnd_t* instance)
 		x[i] = IloNumVarArray(env);
 		for (int j = 0; j < instance->n_arcs; j++)
 		{
-			x[i].add(IloNumVar(env));
-			totalcost.setLinearCoef(x[i][j], instance->arc_commod_ucost[j][i]);
-			capacityConstraints[j].setLinearCoef(x[i][j], 1);
+			// 通过添加列的方式设定系数要快很多
+			x[i].add(IloNumVar(totalcost(instance->arc_commod_ucost[j][i])));
+			// 加入变量后设定系数很费时间
+			//x[i].add(IloNumVar(env));
+			//totalcost.setLinearCoef(x[i][j], instance->arc_commod_ucost[j][i]);
 		}
 	}
-
 	IloIntVarArray2 y(env, n_VehicleTypes);
 	for (int i = 0; i < n_VehicleTypes; i++)
 	{
 		y[i] = IloIntVarArray(env);
 		for (int j = 0; j < instance->n_arcs; j++)
 		{
-			y[i].add(IloIntVar(env));
-			totalcost.setLinearCoef(y[i][j], vehicleFixedcost[i]);
-			capacityConstraints[j].setLinearCoef(y[i][j], -vehicleCapacity[i]);
+			y[i].add(IloIntVar(totalcost(vehicleFixedcost[i])));
+		}
+	}
+	// Capacity Constraints	
+	for (int i = 0; i < instance->n_arcs; i++)
+	{
+		IloExpr left(env);
+		for (int j = 0; j < instance->n_commods; j++)
+			left += x[j][i];
+		for (int j = 0; j < n_VehicleTypes; j++)
+			left -= vehicleCapacity[j] * y[j][i];
+		arcModel.add(left <= 0);
+		left.end();
+	}
+	cout << "db" << (double)(clock() - start) / CLOCKS_PER_SEC << endl;
+
+	// Demand Constraints	
+	for (int i = 0; i < instance->n_nodes; i++)
+	{
+		for (int j = 0; j < instance->n_commods; j++)
+		{
+			IloExpr left(env);
+			for (int k = 0; k < instance->node_n_outgoing_arcs[i]; k++)
+				left += x[j][instance->node_outgoing_arc[i][k]];
+			for (int k = 0; k < instance->node_n_ingoing_arcs[i]; k++)
+				left -= x[j][instance->node_ingoing_arc[i][k]];
+			arcModel.add(left == instance->node_commod_supply[i][j]);
+			left.end();
 		}
 	}
 
-	// Demand Constraints	
-	IloRangeArray2 demandConstraints(env, instance->n_nodes);
-	for (int i = 0; i < instance->n_nodes; i++)
-	{
-		demandConstraints[i] = IloRangeArray(env);
-		for (int j = 0; j < instance->n_commods; j++)
-		{
-			demandConstraints[i].add(IloRange(env, instance->node_commod_supply[i][j], instance->node_commod_supply[i][j]));
-			for (int k = 0; k < instance->node_n_outgoing_arcs[i]; k++)
-				demandConstraints[i][j].setLinearCoef(x[j][instance->node_outgoing_arc[i][k]], 1);
-			for (int k = 0; k < instance->node_n_ingoing_arcs[i]; k++)
-				demandConstraints[i][j].setLinearCoef(x[j][instance->node_ingoing_arc[i][k]], -1);
-		}
-		arcModel.add(demandConstraints[i]);
-	}
 	// Design-balanced constraints
-	IloRangeArray2 dbConstraints(env, instance->n_nodes);
 	for (int i = 0; i < instance->n_nodes; i++)
 	{
-		dbConstraints[i] = IloRangeArray(env);
 		for (int j = 0; j < n_VehicleTypes; j++)
 		{
-			dbConstraints[i].add(IloRange(env, 0, 0));
+			IloExpr left(env);
 			for (int k = 0; k < instance->node_n_outgoing_arcs[i]; k++)
-				dbConstraints[i][j].setLinearCoef(y[j][instance->node_outgoing_arc[i][k]], 1);
+				left += y[j][instance->node_outgoing_arc[i][k]];
 			for (int k = 0; k < instance->node_n_ingoing_arcs[i]; k++)
-				dbConstraints[i][j].setLinearCoef(y[j][instance->node_ingoing_arc[i][k]], -1);
+				left -= y[j][instance->node_ingoing_arc[i][k]];
+			arcModel.add(left == 0);
+			left.end();
 		}
-		arcModel.add(dbConstraints[i]);
 	}
 
 	IloCplex arcSolver(arcModel);
-	arcSolver.setOut(env.getNullStream());
+	//arcSolver.setOut(env.getNullStream());
 	/*for (int k = 0; k < n_VehicleTypes; k++)
 	{
 		arcModel.add(IloConversion(env, y[k], ILOFLOAT));
@@ -100,11 +104,6 @@ void SolvedByCplex(IloEnv env, cmnd_t* instance)
 		x[i].end();
 	y.end();
 	x.end();
-	capacityLowerBound.end();
-	capacityUpperBound.end();
-	capacityConstraints.end();
-	demandConstraints.end();
-	dbConstraints.end();
 }
 
 
